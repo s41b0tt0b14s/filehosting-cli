@@ -27,6 +27,10 @@ enum Commands {
         /// Name of the file to download
         #[arg(value_name = "FILE_NAME")]
         file_name: String,
+
+        /// Optional destination path to save the file
+        #[arg(value_name = "DEST_PATH", default_value = ".")]
+        dest_path: Option<PathBuf>,
     },
     /// List all files
     List,
@@ -58,15 +62,23 @@ async fn main() {
 
             println!("File uploaded successfully!");
         }
-        Some(Commands::Download { file_name }) => {
+        Some(Commands::Download { file_name, dest_path }) => {
             println!("Downloading file: {}", file_name);
 
             let storage_dir = PathBuf::from("files");
-            let file_path = storage_dir.join(file_name);
-
+            let file_path = storage_dir.join(&file_name);
+        
             if file_path.exists() {
                 println!("File found: {:?}", file_path);
-                // For now, just show the file path (future steps can handle actual downloading logic)
+        
+                // Determine the download location (default is the current directory)
+                let destination = dest_path.unwrap_or_else(|| PathBuf::from(".")).join(file_name);
+        
+                // Copy the file to the destination
+                match fs::copy(&file_path, &destination) {
+                    Ok(_) => println!("File downloaded successfully to {:?}", destination),
+                    Err(e) => println!("Error downloading file: {}", e),
+                }
             } else {
                 println!("File not found.");
             }
