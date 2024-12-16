@@ -1,104 +1,46 @@
-use clap::{Parser, Subcommand};
-use std::fs;
-use std::path::PathBuf;
-use std::io::{self, Write};
+use rusqlite::{params, Connection};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-/// The main structure for CLI arguments
-#[derive(Parser)]
-#[command(name = "filehosting-cli")]
-#[command(about = "A file hosting CLI application written in Rust", long_about = None)]
-struct Cli {
-    /// The command to run
-    #[command(subcommand)]
-    command: Option<Commands>,
+fn init_db() -> rusqlite::Result<Connection> {
+    let conn = Connection::open("filehosting.db")?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            uploaded_at TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    Ok(conn)
 }
 
-/// The subcommands for the CLI
-#[derive(Subcommand)]
-enum Commands {
-    /// Upload a file
-    Upload {
-        /// Path to the file to upload
-        #[arg(value_name = "FILE")]
-        file: PathBuf,
-    },
-    /// Download a file
-    Download {
-        /// Name of the file to download
-        #[arg(value_name = "FILE_NAME")]
-        file_name: String,
+fn insert_file_metadata(conn: &Connection, filename: &str, size: u64) -> rusqlite::Result<()> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string();
 
-        /// Optional destination path to save the file
-        #[arg(value_name = "DEST_PATH", default_value = ".")]
-        dest_path: Option<PathBuf>,
-    },
-    /// List all files
-    List,
+    conn.execute(
+        "INSERT INTO files (filename, size, uploaded_at) VALUES (?1, ?2, ?3)",
+        params![filename, size, timestamp],
+    )?;
+
+    println!("File metadata inserted: {} ({} bytes)", filename, size);
+
+    Ok(())
 }
 
-#[tokio::main]
-async fn main() {
-    let cli = Cli::parse();
+fn main() -> rusqlite::Result<()> {
+    let conn = init_db()?;
 
-    match cli.command {
-        Some(Commands::Upload { file }) => {
-            println!("Uploading file: {:?}", file);
+    let filename = "example.txt";
+    let size = 1024;
 
-            // Check if the file exists
-            if !file.exists() {
-                println!("File does not exist.");
-                return;
-            }
+    insert_file_metadata(&conn, filename, size)?;
 
-            // Ensure the storage directory exists
-            let storage_dir = PathBuf::from("files");
-            if !storage_dir.exists() {
-                fs::create_dir_all(&storage_dir).expect("Failed to create storage directory");
-            }
-
-            // Copy the file to the storage directory
-            let dest = storage_dir.join(file.file_name().unwrap());
-            fs::copy(&file, dest).expect("Failed to copy file");
-
-            println!("File uploaded successfully!");
-        }
-        Some(Commands::Download { file_name, dest_path }) => {
-            println!("Downloading file: {}", file_name);
-
-            let storage_dir = PathBuf::from("files");
-            let file_path = storage_dir.join(&file_name);
-        
-            if file_path.exists() {
-                println!("File found: {:?}", file_path);
-        
-                // Determine the download location (default is the current directory)
-                let destination = dest_path.unwrap_or_else(|| PathBuf::from(".")).join(file_name);
-        
-                // Copy the file to the destination
-                match fs::copy(&file_path, &destination) {
-                    Ok(_) => println!("File downloaded successfully to {:?}", destination),
-                    Err(e) => println!("Error downloading file: {}", e),
-                }
-            } else {
-                println!("File not found.");
-            }
-        }
-        Some(Commands::List) => {
-            println!("Listing all files:");
-
-            let storage_dir = PathBuf::from("files");
-            if storage_dir.exists() {
-                let entries = fs::read_dir(storage_dir).expect("Failed to read directory");
-                for entry in entries {
-                    let entry = entry.expect("Failed to read entry");
-                    println!("{}", entry.file_name().to_string_lossy());
-                }
-            } else {
-                println!("No files found.");
-            }
-        }
-        None => {
-            println!("No command provided");
-        }
-    }
+    Ok(())
 }
